@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Next.js Polling App with Supabase Authentication
 
-## Getting Started
+This is a polling application built with Next.js and Supabase for authentication and database storage.
 
-First, run the development server:
+## Setup Instructions
+
+### 1. Environment Variables
+
+Create a `.env.local` file in the root directory with the following variables:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### 2. Install Dependencies
+
+```bash
+npm install
+```
+
+### 3. Run Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Authentication System
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The authentication system uses Supabase Auth and includes:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- User registration with email/password
+- User login with email/password
+- Protected routes with middleware
+- Authentication context for managing user state
 
-## Learn More
+### Authentication Flow
 
-To learn more about Next.js, take a look at the following resources:
+1. Users can register at `/auth/register`
+2. Users can login at `/auth/login`
+3. Protected routes redirect to login if not authenticated
+4. Auth routes redirect to home if already authenticated
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Database Schema
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The application uses the following tables in Supabase:
 
-## Deploy on Vercel
+- `profiles`: User profile information
+- `polls`: Poll data created by users
+- `options`: Options for each poll
+- `votes`: User votes on poll options
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `/app`: Next.js app router pages
+- `/components`: React components
+- `/context`: React context providers
+- `/lib`: Utility functions and API clients
+- `/middleware.ts`: Authentication middleware
+
+## Development
+
+To add new features or modify existing ones, refer to the component structure and authentication flow described above.
