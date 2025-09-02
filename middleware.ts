@@ -6,14 +6,6 @@ export async function middleware(request: NextRequest) {
   // Update the session using the utility function
   const response = await updateSession(request);
   
-  // Get the session from the cookies
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  
-  // Check if the user is authenticated by looking for the sb-access-token cookie
-  const hasAccessToken = request.cookies.has('sb-access-token');
-  const session = hasAccessToken ? { user: {} } : null;
-
   // Authentication logic based on route
   const path = request.nextUrl.pathname;
 
@@ -36,13 +28,17 @@ export async function middleware(request: NextRequest) {
   // Check if the current path is an auth route
   const isAuthRoute = authRoutes.some(route => path === route);
 
+  // Get the session cookie to check authentication status
+  const hasAccessToken = request.cookies.has('sb-access-token') || 
+                         request.cookies.has('sb-refresh-token');
+
   // Redirect logic
-  if (isProtectedRoute && !session) {
+  if (isProtectedRoute && !hasAccessToken) {
     // Redirect to login if trying to access protected route without session
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
-  if (isAuthRoute && session) {
+  if (isAuthRoute && hasAccessToken) {
     // Redirect to home if trying to access auth routes with active session
     return NextResponse.redirect(new URL('/', request.url));
   }
