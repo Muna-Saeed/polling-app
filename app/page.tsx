@@ -1,7 +1,6 @@
-import Image from "next/image";
-
 'use client';
 
+import Image from "next/image";
 import { useAuth } from '@/context/AuthProvider';
 import Link from 'next/link';
 

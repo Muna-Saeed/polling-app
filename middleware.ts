@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
+import { updateSession } from './utils/supabase/middleware';
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next();
-  const supabase = createMiddlewareClient({ req: request, res: response });
-
-  // Refresh session if expired - required for Server Components
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // Update the session using the utility function
+  const response = await updateSession(request);
+  
+  // Get the session from the cookies
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  // Check if the user is authenticated by looking for the sb-access-token cookie
+  const hasAccessToken = request.cookies.has('sb-access-token');
+  const session = hasAccessToken ? { user: {} } : null;
 
   // Authentication logic based on route
   const path = request.nextUrl.pathname;
