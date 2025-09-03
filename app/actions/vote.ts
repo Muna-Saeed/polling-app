@@ -1,8 +1,9 @@
 'use server';
 
-import { createServerClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
 import { z } from 'zod';
+import { createClient } from '@/utils/supabase/server';
+import { getAuthenticatedUser } from '@/utils/auth';
+import { upsertVote, VoteOperationResult } from '@/utils/polls';
 
 // Define the vote schema
 const voteSchema = z.object({
@@ -10,97 +11,68 @@ const voteSchema = z.object({
   optionId: z.string(),
 });
 
-export type VoteResponse = {
-  success: boolean;
-  message: string;
-  data?: any;
-  error?: string;
-};
+export type VoteResponse =
+  | { success: true; message: string; data: any }
+  | { success: false; message: string; error: string };
 
 export async function submitVote(formData: FormData): Promise<VoteResponse> {
-  try {
-    // Extract and validate the data
-    const pollId = formData.get('pollId') as string;
-    const optionId = formData.get('optionId') as string;
-    
-    const validatedData = voteSchema.parse({ pollId, optionId });
-    
-    // Create a Supabase client
-    const cookieStore = cookies();
-    const supabase = createServerClient(cookieStore);
-    
-    // Get the current user
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      return {
-        success: false,
-        message: 'You must be logged in to vote',
-        error: 'UNAUTHORIZED',
-      };
-    }
-    
-    // Check if user has already voted on this poll
-    const { data: existingVote } = await supabase
-      .from('votes')
-      .select('id')
-      .eq('poll_id', validatedData.pollId)
-      .eq('user_id', session.user.id)
-      .single();
-    
-    if (existingVote) {
-      // Update existing vote
-      const { error: updateError } = await supabase
-        .from('votes')
-        .update({ option_id: validatedData.optionId })
-        .eq('id', existingVote.id);
-      
-      if (updateError) {
-        console.error('Error updating vote:', updateError);
-        return {
-          success: false,
-          message: 'Failed to update vote',
-          error: updateError.message,
-        };
-      }
-      
-      return {
-        success: true,
-        message: 'Your vote has been updated',
-      };
-    }
-    
-    // Insert new vote
-    const { data, error } = await supabase
-      .from('votes')
-      .insert({
-        poll_id: validatedData.pollId,
-        option_id: validatedData.optionId,
-        user_id: session.user.id,
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error submitting vote:', error);
-      return {
-        success: false,
-        message: 'Failed to submit vote',
-        error: error.message,
-      };
-    }
-    
-    return {
-      success: true,
-      message: 'Your vote has been submitted',
-      data,
-    };
-  } catch (error) {
-    console.error('Error processing vote:', error);
+  // Extract & validate payload early
+  const pollId = formData.get('pollId') as string;
+  const optionId = formData.get('optionId') as string;
+
+  const parse = voteSchema.safeParse({ pollId, optionId });
+  if (!parse.success) {
     return {
       success: false,
-      message: 'Failed to process vote',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Invalid request payload',
+      error: parse.error.message,
     };
   }
+
+  // Create Supabase client (server side)
+  const supabase = await createClient();
+
+  // Ensure user is authenticated
+  const { user, error: authErr } = await getAuthenticatedUser(supabase);
+  if (authErr) {
+    return {
+      success: false,
+      message: 'Authentication error',
+      error: authErr,
+    };
+  }
+
+  if (!user) {
+    return {
+      success: false,
+      message: 'You must be logged in to vote',
+      error: 'UNAUTHORIZED',
+    };
+  }
+
+  // Perform a single upsert to record the vote
+  const result: VoteOperationResult = await upsertVote(supabase, {
+    pollId,
+    optionId,
+    userId: user.id,
+  });
+
+  if (!result.success) {
+    return {
+      success: false,
+      message: 'Failed to record vote',
+      error: result.error,
+    };
+  }
+
+  const message = result.wasUpdate
+    ? 'Your vote has been updated'
+    : 'Your vote has been submitted';
+
+  return {
+    success: true,
+    message,
+    data: result.data,
+  };
+
 }
