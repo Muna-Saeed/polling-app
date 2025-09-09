@@ -12,7 +12,22 @@ const voteSchema = z.object({
 
 export async function POST(req: NextRequest) {
   // Extract & validate payload
-  const body = await req.json();
+  const contentType = req.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return NextResponse.json(
+      { success: false, message: 'Unsupported media type', error: 'EXPECTED_APPLICATION_JSON' },
+      { status: 415 }
+    );
+  }
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, message: 'Invalid JSON payload', error: 'BAD_JSON' },
+      { status: 400 }
+    );
+  }
   const parse = voteSchema.safeParse(body);
 
   if (!parse.success) {
