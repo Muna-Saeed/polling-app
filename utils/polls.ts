@@ -43,3 +43,20 @@ export async function upsertVote(
 
   return { success: true, data, wasUpdate };
 }
+
+export async function getPollsForUser(
+  supabase: SupabaseClient,
+  userId: string
+) {
+  const { data, error } = await supabase
+    .from('polls')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error fetching polls for user:', error);
+    return null;
+  }
+
+  return data;
+}
