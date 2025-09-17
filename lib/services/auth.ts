@@ -57,10 +57,15 @@ export async function signOut() {
   }
 }
 
-export async function signUpWithEmail(email: string, password: string) {
+export async function signUpWithEmail(email: string, password: string, name?: string) {
   const { data, error } = await getSupabaseClient().auth.signUp({
     email,
     password,
+    options: {
+      data: {
+        full_name: name || ''
+      }
+    }
   })
   
   if (error) {

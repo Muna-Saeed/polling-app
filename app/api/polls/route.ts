@@ -1,95 +1,123 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { createServerClient } from '@/lib/supabase/server';
+import { withRateLimit } from '@/middleware/rateLimit';
+import { ValidationError } from '@/lib/errors';
+import { createPoll } from '@/lib/services/polls';
 
-export async function POST(request: NextRequest) {
+// Rate limit configuration
+const rateLimitOptions = {
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+};
+
+interface CreatePollRequest {
+  title?: string;
+  description?: string | null;
+  question: string;
+  options: string[];
+}
+
+/**
+ * @swagger
+ * /api/polls:
+ *   post:
+ *     summary: Create a new poll
+ *     description: Creates a new poll with the provided question and options
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [question, options]
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 maxLength: 200
+ *               description:
+ *                 type: string
+ *                 maxLength: 500
+ *               question:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *               options:
+ *                 type: array
+ *                 minItems: 2
+ *                 maxItems: 10
+ *                 items:
+ *                   type: string
+ *                   minLength: 1
+ *                   maxLength: 200
+ *     responses:
+ *       201:
+ *         description: Poll created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                   format: uuid
+ *       400:
+ *         description: Invalid input data
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+async function createPollHandler(request: NextRequest) {
   try {
-    // Get the request body
-    const body = await request.json();
-    const { title, description, question, options } = body;
-
-    // Validate required fields
-    if (!title || !description || !question || !options || options.length < 2) {
-      return NextResponse.json(
-        { message: 'Title, description, question, and at least 2 options are required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate question length
-    if (question.length < 10) {
-      return NextResponse.json(
-        { message: 'Question must be at least 10 characters long' },
-        { status: 400 }
-      );
-    }
-
-    // Validate that all options are non-empty
-    if (options.some((option: string) => !option.trim())) {
-      return NextResponse.json(
-        { message: 'All options must be non-empty' },
-        { status: 400 }
-      );
-    }
-
-    // Get Supabase client
-    const supabase = getSupabaseServerClient();
-
-    // Get the current user
+    const supabase = createServerClient();
     const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
+
+    if (!session?.user?.id) {
       return NextResponse.json(
-        { message: 'You must be logged in to create a poll' },
+        { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    // Insert the poll into the database
-    const { data: pollData, error: pollError } = await supabase
-      .from('polls')
-      .insert({
-        title,
-        description,
-        question,
-        user_id: session.user.id,
-      })
-      .select()
-      .single();
+    const { title, description, question, options } = await request.json() as CreatePollRequest;
 
-    if (pollError) {
-      console.error('Error creating poll:', pollError);
-      return NextResponse.json(
-        { message: 'Failed to create poll' },
-        { status: 500 }
-      );
+    // Validate required fields
+    if (!question?.trim() || !Array.isArray(options) || options.length < 2) {
+      throw new ValidationError('Question and at least 2 options are required');
     }
 
-    // Insert the options into the database
-    const optionsToInsert = options.map((option: string) => ({
-      poll_id: pollData.id,
-      text: option,
-    }));
+    // Create the poll
+    const pollId = await createPoll(
+      title?.trim() || 'Untitled Poll',
+      description?.trim() || null,
+      question.trim(),
+      options.map((opt: string) => opt.trim()),
+      session.user.id
+    );
 
-    const { error: optionsError } = await supabase
-      .from('poll_options')
-      .insert(optionsToInsert);
-
-    if (optionsError) {
-      console.error('Error creating poll options:', optionsError);
-      // Attempt to delete the poll if options creation fails
-      await supabase.from('polls').delete().eq('id', pollData.id);
-      return NextResponse.json(
-        { message: 'Failed to create poll options' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(pollData, { status: 201 });
-  } catch (error) {
-    console.error('Error processing request:', error);
     return NextResponse.json(
-      { message: 'Internal server error' },
+      { 
+        id: pollId,
+        message: 'Poll created successfully'
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error('Error creating poll:', error);
+    
+    if (error instanceof ValidationError) {
+      return NextResponse.json(
+        { error: 'VALIDATION_ERROR', message: error.message },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: 'INTERNAL_SERVER_ERROR', message: 'Failed to create poll' },
       { status: 500 }
     );
   }
 }
+
+// Apply rate limiting to the POST handler
+export const POST = withRateLimit(createPollHandler, rateLimitOptions);
