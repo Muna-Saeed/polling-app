@@ -1,55 +1,101 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { updateSession } from './utils/supabase/middleware';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+
+const PUBLIC_PATHS = ['/auth/login', '/auth/register', '/'];
+const PROTECTED_PATHS = ['/create-poll', '/my-polls', '/account'];
 
 export async function middleware(request: NextRequest) {
-  // Update the session using the utility function
-  const response = await updateSession(request);
-  
-  // Authentication logic based on route
-  const path = request.nextUrl.pathname;
+  // Create a response object
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
 
-  // Protected routes - redirect to login if not authenticated
-  const protectedRoutes = [
-    '/create-poll',
-    '/my-polls',
-    '/account',
-  ];
+  // Create a Supabase client configured to use cookies
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return request.cookies.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          // Update the request cookies
+          request.cookies.set({
+            name,
+            value,
+            ...options,
+          });
+          
+          // Update the response cookies
+          response.cookies.set({
+            name,
+            value,
+            ...options,
+            sameSite: 'lax',
+            path: '/',
+          });
+        },
+        remove(name: string, options: CookieOptions) {
+          // Update the request cookies
+          request.cookies.set({
+            name,
+            value: '',
+            ...options,
+            maxAge: 0,
+          });
+          
+          // Update the response cookies
+          response.cookies.set({
+            name,
+            value: '',
+            ...options,
+            maxAge: 0,
+            path: '/',
+          });
+        },
+      },
+    }
+  );
 
-  // Auth routes - redirect to home if already authenticated
-  const authRoutes = [
-    '/auth/login',
-    '/auth/register',
-  ];
+  // Refresh the session if expired - required for Server Components
+  const { data: { session } } = await supabase.auth.getSession();
+  const currentPath = request.nextUrl.pathname;
 
-  // Check if the current path is a protected route
-  const isProtectedRoute = protectedRoutes.some(route => path.startsWith(route));
-  
-  // Check if the current path is an auth route
-  const isAuthRoute = authRoutes.some(route => path === route);
+  // Check if the current path is protected
+  const isProtectedPath = PROTECTED_PATHS.some(path => 
+    currentPath.startsWith(path)
+  );
 
-  // Get the session cookie to check authentication status
-  const hasAccessToken = request.cookies.has('sb-access-token') || 
-                         request.cookies.has('sb-refresh-token');
+  // Check if the current path is a public auth path
+  const isPublicPath = PUBLIC_PATHS.some(path => 
+    currentPath === path || currentPath.startsWith(`${path}/`)
+  );
 
-  // Redirect logic
-  if (isProtectedRoute && !hasAccessToken) {
-    // Redirect to login if trying to access protected route without session
-    return NextResponse.redirect(new URL('/auth/login', request.url));
+  // Handle protected routes
+  if (isProtectedPath) {
+    if (!session) {
+      const redirectUrl = new URL('/auth/login', request.url);
+      redirectUrl.searchParams.set('redirectedFrom', currentPath);
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
-  if (isAuthRoute && hasAccessToken) {
-    // Redirect to home if trying to access auth routes with active session
-    return NextResponse.redirect(new URL('/', request.url));
+  // Handle auth routes (login/register)
+  if (isPublicPath && session && !currentPath.startsWith('/auth/callback')) {
+    if (currentPath !== '/') {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
   return response;
 }
 
-// Specify which routes this middleware should run on
 export const config = {
   matcher: [
-    // Apply to all routes except static files, api routes, and _next
-    '/((?!_next/static|_next/image|favicon.ico|api/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/|_next/data/).*)',
   ],
 };

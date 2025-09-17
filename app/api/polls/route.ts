@@ -1,6 +1,5 @@
-import { createServerClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,9 +31,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create a Supabase client
-    const cookieStore = cookies();
-    const supabase = createServerClient(cookieStore);
+    // Get Supabase client
+    const supabase = getSupabaseServerClient();
 
     // Get the current user
     const { data: { session } } = await supabase.auth.getSession();

@@ -1,9 +1,8 @@
 'use server';
 
 import { z } from 'zod';
-import { createClient } from '@/utils/supabase/server';
-import { getAuthenticatedUser } from '@/utils/auth';
-import { upsertVote, VoteOperationResult } from '@/utils/polls';
+import { requireSession } from '@/lib/services/auth';
+import { submitVote } from '@/lib/services/polls';
 
 // Define the vote schema
 const voteSchema = z.object({
@@ -15,10 +14,14 @@ export type VoteResponse =
   | { success: true; message: string; data: any }
   | { success: false; message: string; error: string };
 
-export async function submitVote(formData: FormData): Promise<VoteResponse> {
-  // Extract & validate payload early
-  const pollId = formData.get('pollId') as string;
-  const optionId = formData.get('optionId') as string;
+export async function submitVoteAction(pollId: string, optionId: string): Promise<VoteResponse> {
+  if (!pollId || !optionId) {
+    return {
+      success: false,
+      message: 'Poll ID and option ID are required',
+      error: 'Missing required fields',
+    };
+  }
 
   const parse = voteSchema.safeParse({ pollId, optionId });
   if (!parse.success) {
@@ -29,50 +32,28 @@ export async function submitVote(formData: FormData): Promise<VoteResponse> {
     };
   }
 
-  // Create Supabase client (server side)
-  const supabase = await createClient();
+  try {
+    // Ensure user is authenticated
+    const session = await requireSession();
+    
+    // Submit the vote
+    const result = await submitVote(
+      parse.data.pollId,
+      parse.data.optionId,
+      session.user.id
+    );
 
-  // Ensure user is authenticated
-  const { user, error: authErr } = await getAuthenticatedUser(supabase);
-  if (authErr) {
+    return {
+      success: true,
+      message: 'Vote submitted successfully',
+      data: result,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     return {
       success: false,
-      message: 'Authentication error',
-      error: authErr,
+      message: errorMessage,
+      error: errorMessage,
     };
   }
-
-  if (!user) {
-    return {
-      success: false,
-      message: 'You must be logged in to vote',
-      error: 'UNAUTHORIZED',
-    };
-  }
-
-  // Perform a single upsert to record the vote
-  const result: VoteOperationResult = await upsertVote(supabase, {
-    pollId,
-    optionId,
-    userId: user.id,
-  });
-
-  if (!result.success) {
-    return {
-      success: false,
-      message: 'Failed to record vote',
-      error: result.error,
-    };
-  }
-
-  const message = result.wasUpdate
-    ? 'Your vote has been updated'
-    : 'Your vote has been submitted';
-
-  return {
-    success: true,
-    message,
-    data: result.data,
-  };
-
 }

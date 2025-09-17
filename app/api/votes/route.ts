@@ -1,83 +1,46 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { createClient } from '@/utils/supabase/server';
-import { getAuthenticatedUser } from '@/utils/auth';
-import { upsertVote, VoteOperationResult } from '@/utils/polls';
+import { type NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { submitVote } from '@/lib/services/polls'
+import { requireSession } from '@/lib/services/auth'
+import { responses } from '@/lib/utils/api'
 
-// Define the vote schema
-const voteSchema = z.object({
-  pollId: z.string(),
-  optionId: z.string(),
-});
-
-export async function POST(req: NextRequest) {
-  // Extract & validate payload
-  const contentType = req.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
-    return NextResponse.json(
-      { success: false, message: 'Unsupported media type', error: 'EXPECTED_APPLICATION_JSON' },
-      { status: 415 }
-    );
-  }
-  let body;
+export async function POST(request: NextRequest) {
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { success: false, message: 'Invalid JSON payload', error: 'BAD_JSON' },
-      { status: 400 }
-    );
+    const session = await requireSession()
+    const { pollId, optionId } = await request.json()
+    
+    if (!pollId || !optionId) {
+      return responses.validationError('Poll ID and option ID are required')
+    }
+
+    const updatedPoll = await submitVote(pollId, optionId, session.user.id)
+    return responses.success(updatedPoll)
+    
+  } catch (error) {
+    console.error('Error in vote submission:', error)
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Unauthorized')) {
+        return responses.unauthorized()
+      }
+      if (error.message.includes('already voted')) {
+        return responses.validationError(error.message)
+      }
+    }
+    
+    return responses.serverError(error)
   }
-  const parse = voteSchema.safeParse(body);
+}
 
-  if (!parse.success) {
-    return NextResponse.json(
-      { success: false, message: 'Invalid request payload', error: parse.error.message },
-      { status: 400 }
-    );
-  }
-
-  const { pollId, optionId } = parse.data;
-
-  // Create Supabase client
-  const supabase = await createClient();
-
-  // Ensure user is authenticated
-  const { user, error: authErr } = await getAuthenticatedUser(supabase);
-  if (authErr) {
-    return NextResponse.json(
-      { success: false, message: 'Authentication error', error: authErr },
-      { status: 500 }
-    );
-  }
-
-  if (!user) {
-    return NextResponse.json(
-      { success: false, message: 'You must be logged in to vote', error: 'UNAUTHORIZED' },
-      { status: 401 }
-    );
-  }
-
-  // Perform a single upsert to record the vote
-  const result: VoteOperationResult = await upsertVote(supabase, {
-    pollId,
-    optionId,
-    userId: user.id,
-  });
-
-  if (!result.success) {
-    return NextResponse.json(
-      { success: false, message: 'Failed to record vote', error: result.error },
-      { status: 500 }
-    );
-  }
-
-  const message = result.wasUpdate
-    ? 'Your vote has been updated'
-    : 'Your vote has been submitted';
-
-  return NextResponse.json(
-    { success: true, message, data: result.data },
-    { status: result.wasUpdate ? 200 : 201 }
-  );
+// Add OPTIONS handler for CORS preflight
+// @ts-ignore - This is a valid route handler
+export const OPTIONS = async () => {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  })
 }

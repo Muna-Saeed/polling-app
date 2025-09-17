@@ -23,8 +23,12 @@ const LoginForm = () => {
       if (error) {
         setError(error.message || 'Failed to sign in');
       } else {
-        // Redirect to dashboard or home page after successful login
-        router.push('/');
+        // Get the redirect URL from the query parameters or default to '/'
+        const searchParams = new URLSearchParams(window.location.search);
+        const redirectTo = searchParams.get('redirectedFrom') || '/';
+        
+        // Use window.location for a full page reload to ensure auth state is properly synced
+        window.location.href = redirectTo;
       }
     } catch (err) {
       setError('An unexpected error occurred');
