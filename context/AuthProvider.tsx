@@ -32,85 +32,97 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const { user, isLoading } = state;
   const supabase = getSupabaseClient();
 
-  const updateState = useCallback((updates: Partial<typeof state>) => {
+  // Update state helper
+  const updateState = (updates: Partial<typeof state>) => {
     setState(prev => ({
       ...prev,
       ...updates,
     }));
-  }, []);
+  };
 
-  const handleAuthSuccess = useCallback((session: { user: User } | null) => {
-    updateState({ user: session?.user ?? null, isLoading: false });
-  }, [updateState]);
-
-  const handleAuthError = useCallback((error: Error) => {
-    console.error('Authentication error:', error);
-    updateState({ user: null, isLoading: false });
-    return { error };
-  }, [updateState]);
-
-  const checkUser = useCallback(async (): Promise<User | null> => {
-    try {
-      const currentUser = await getCurrentUser();
-      updateState({ user: currentUser, isLoading: false });
-      return currentUser;
-    } catch (error) {
-      updateState({ user: null, isLoading: false });
-      return null;
-    }
-  }, [updateState]);
-
+  // Authentication functions with useCallback
   const signIn = useCallback(async (email: string, password: string) => {
     try {
       const { user } = await signInWithEmail(email, password);
-      updateState({ user });
+      updateState({ user, isLoading: false });
       return { error: null };
     } catch (error) {
-      return handleAuthError(error as Error);
+      console.error('Sign in error:', error);
+      updateState({ user: null, isLoading: false });
+      return { error: error as Error };
     }
-  }, [handleAuthError, updateState]);
+  }, []);
 
-  const signUp = useCallback(async (email: string, password: string, name: string) => {
+  const signUp = useCallback(async (email: string, password: string, name?: string) => {
     try {
-      const { user } = await signUpWithEmail(email, password, name);
-      updateState({ user });
+      const { user } = await signUpWithEmail(email, password, name || '');
+      updateState({ user, isLoading: false });
       return { error: null };
     } catch (error) {
-      return handleAuthError(error as Error);
+      console.error('Sign up error:', error);
+      updateState({ user: null, isLoading: false });
+      return { error: error as Error };
     }
-  }, [handleAuthError, updateState]);
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
       await signOutService();
-      updateState({ user: null });
+      updateState({ user: null, isLoading: false });
       return { error: null };
     } catch (error) {
-      return handleAuthError(error as Error);
+      console.error('Sign out error:', error);
+      return { error: error as Error };
     }
-  }, [handleAuthError, updateState]);
+  }, []);
 
+  // Check current user on mount
   useEffect(() => {
-    const initializeAuth = async () => {
-      await checkUser();
+    let isMounted = true;
+    let subscription: { unsubscribe: () => void } | null = null;
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const checkUser = async () => {
+      if (!isMounted) return;
+      
+      try {
+        const currentUser = await getCurrentUser();
+        if (isMounted) {
+          updateState({ user: currentUser, isLoading: false });
+        }
+      } catch (error) {
+        if (isMounted) {
+          updateState({ user: null, isLoading: false });
+        }
+      }
+    };
+
+    // Set up auth state listener
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange(
         async (_, session) => {
-          if (session?.user) {
-            handleAuthSuccess(session);
-          } else {
-            await checkUser();
+          if (isMounted) {
+            updateState({ 
+              user: session?.user ?? null, 
+              isLoading: false 
+            });
           }
         }
       );
+      // Store the subscription directly as it already has an unsubscribe method
+      subscription = data as unknown as { unsubscribe: () => void };
+    }
 
-      return () => {
-        subscription?.unsubscribe();
-      };
+    // Initial check
+    checkUser();
+
+    // Cleanup
+    return () => {
+      isMounted = false;
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
-
-    initializeAuth().catch(handleAuthError);
-  }, [checkUser, handleAuthError, handleAuthSuccess, supabase]);
+  }, [supabase, updateState]);
 
   const contextValue = useMemo<AuthContextType>(
     () => ({
